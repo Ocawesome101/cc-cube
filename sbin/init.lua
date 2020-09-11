@@ -1,0 +1,1 @@
+error("INIT IS NOT FUNCTIONAL")
