@@ -213,7 +213,7 @@ do
     ['`'] = "~"
   }
   setmetatable(shift, {__index = function(t,k)
-                                     if #k == 1 then
+                                     if k and #k == 1 then
                                        return k:upper()
                                      else
                                        return ""
@@ -280,7 +280,6 @@ do
             flush()
             mode = 1
           elseif c == "\7" then -- ascii BEL
-            computer.beep(".")
           else
             wb = wb .. c
           end
@@ -291,13 +290,11 @@ do
             mode = 0
           end
         elseif mode == 2 then
-          if c:match("[%d]") then
+          if c:match("%d") then
             nb = nb .. c
           elseif c == ";" then
-            if #nb > 0 then
-              p[#p+1] = tonumber(nb) or 0
-              nb = ""
-            end
+            p[#p+1] = tonumber(nb) or 0
+            nb = ""
           else
             mode = 0
             if #nb > 0 then
@@ -317,7 +314,7 @@ do
             elseif c == "F" then
               cx, cy = 1, cy - max(0, p[1] or 1)
             elseif c == "G" then
-              cx = min(w, max(p[1] or 1))
+              cx = min(max(p[1] or 0, 1), w)
             elseif c == "H" or c == "f" then
               cx, cy = min(w, max(0, p[2] or 1)), min(h, max(0, p[1] or 1))
             elseif c == "J" then
@@ -381,6 +378,7 @@ do
                 rb = rb .. string.format("\27[%s;%sR", cy, cx)
               end
             end
+            p = {}
           end
         end
         flush()
@@ -416,6 +414,7 @@ do
     local function key(_, code)
       local c = keys[code]
       if shifted and c:sub(1,1) ~= "\27" then c = shift[c] end
+      c = c or ""
       if #c > 1 and c:sub(1,1) ~= "\27" then
         if type(c) == "function" then
           c()
@@ -557,17 +556,19 @@ do
   local last = 0
   local cur = 0
 
-  function t.spawn(f,n)
+  function t.spawn(f,n,a)
     expect(1, f, "function")
     expect(2, n, "string")
+    expect(3, a, "table", "nil")
     last = last + 1
+    a = a or {}
     local new = {
       parent = last - 1,
       pid = last,
       name = n,
       coro = coroutine.create(f),
       env = {},
-      io = {i = kernel.vt, o = kernel.vt}
+      io = {i = a.io or kernel.console, o = a.io or kernel.console}
     }
     threads[last] = new
     return last
@@ -601,6 +602,36 @@ do
     kernel.panic("all threads died")
   end
   kernel.thread = t
+end
+
+kernel.log("usb: creating userspace sandbox")
+do
+  function table.copy(tbl)
+    expect(1, tbl, "table")
+    local seen = {}
+    local function copy(t)
+      local ret = {}
+      for k, v in pairs(t) do
+        if type(v) == "table" then
+          if seen[v] then
+            ret[k] = seen[v]
+          else
+            seen[v] = true
+            seen[v] = copy(v)
+            ret[k] = seen[v]
+          end
+        else
+          ret[k] = v
+        end
+      end
+      return ret
+    end
+    return copy(tbl)
+  end
+
+  kernel.log("copying _G")
+  kernel.usb = table.copy(_G)
+  kernel.usb._G = kernel.usb
 end
 
 kernel.log("loading init from /sbin/init.lua")
