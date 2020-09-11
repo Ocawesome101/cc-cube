@@ -56,6 +56,7 @@ do
       y = y + 1
     end
     term.set(1, y, msg)
+    kernel.logY = y
   end
   term.clear()
   function kernel.log(msg)
@@ -63,12 +64,57 @@ do
       log(string.format("[%4.4f] %s", (os.epoch("utc") - start) / 1000, ln))
     end
   end
+  function kernel.panic(msg)
+    kernel.log("-- KERNEL PANIC --")
+    kernel.log(debug.traceback(msg, 1):gsub("\t", "  "))
+    kernel.log("-- END TRACE --")
+    while true do coroutine.yield() end
+  end
 end
 
 kernel.log("Starting " .. kernel._VERSION .. " on " .. _VERSION)
 
+kernel.log("kevent: initialize")
+do
+  local acts = {}
+  local event = {}
+  function event.register(evt, handler)
+    expect(1, evt, "string")
+    expect(2, handler, "function")
+    table.insert(acts, {call = handler, sig = evt})
+    return true
+  end
+
+  function event.pull(timeout)
+    expect(1, timeout, "number", "nil")
+    local timerId = timeout and  os.startTimer(timeout) or -1
+    local evt = table.pack(coroutine.yield())
+    if evt[1] == "timer" and evt[2] == timerId then
+      return
+    end
+    for k, act in pairs(acts) do
+      if act.sig == evt[1] then
+        local ok, err = pcall(act.call, table.unpack(evt))
+        if not ok and err then
+          kernel.log("kevent: listener error: " .. err)
+          acts[k] = nil
+        end
+      end
+    end
+    return table.unpack(evt)
+  end
+
+  kernel.log("kevent: compatibility: os.pullEvent")
+  os.pullEvent = event.pull
+  kernel.log("kevent: compatibility: kernel.event.push")
+  event.push = os.pushEvent
+  
+  kernel.event = event
+end
+
 kernel.log("vt100: initialize")
 do
+  kernel.log("vt100: note: colors may be off on non-\ncolor terminals")
   local colors = {
     1,
     2,
@@ -85,10 +131,94 @@ do
     512,
     1024,
     2048,
+    4096,
     8192,
-    16284,
+    16384,
     32768
   }
+
+  -- keys: mostly copy-pasted from CraftOS
+  kernel.log("vt100: note: key codes are subject to \nchange without warning due to Minecraft \nupdates.")
+  kernel.log("vt100: note: please open an issue if this\nhappens!")
+  local keys = {
+    nil,            "1",            "2",            "3",            "4",            -- 1
+    "5",            "6",            "7",            "8",            "9",            -- 6
+    "0",            "-",            "=",            "\8",           "\t",           -- 11
+    "q",            "w",            "e",            "r",            "t",            -- 16
+    "y",            "u",            "i",            "o",            "p",            -- 21
+    "[",            "]",            "\13",          "leftCtrl",     "a",            -- 26
+    "s",            "d",            "f",            "g",            "h",            -- 31
+    "j",            "k",            "l",            ";",            "'",            -- 36
+    "`",            "leftShift",    "\\",           "z",            "x",            -- 41
+    "c",            "v",            "b",            "n",            "m",            -- 46
+    ",",            ".",            "/",            "rightShift",   "*",            -- 51
+    "leftAlt",      " ",            "capsLock",     "f1",           "f2",           -- 56
+    "f3",           "f4",           "f5",           "f6",           "f7",           -- 61
+    "f8",           "f9",           "f10",          "numLock",      "scrollLock",   -- 66
+    "numPad7",      "numPad8",      "numPad9",      "numPadSubtract","numPad4",     -- 71
+    "numPad5",      "numPad6",      "numPadAdd",    "numPad1",      "numPad2",      -- 76
+    "numPad3",      "numPad0",      "numPadDecimal",nil,            nil,            -- 81
+    nil,            "f11",          "f12",          nil,            nil,            -- 86
+    nil,            nil,            nil,            nil,            nil,            -- 91
+    nil,            nil,            nil,            nil,            "f13",          -- 96
+    "f14",          "f15",          nil,            nil,            nil,            -- 101
+    nil,            nil,            nil,            nil,            nil,            -- 106
+    nil,            "kana",         nil,            nil,            nil,            -- 111
+    nil,            nil,            nil,            nil,            nil,            -- 116
+    "convert",      nil,            "noconvert",    nil,            "yen",          -- 121
+    nil,            nil,            nil,            nil,            nil,            -- 126
+    nil,            nil,            nil,            nil,            nil,            -- 131
+    nil,            nil,            nil,            nil,            nil,            -- 136
+    "=",            nil,            nil,            "circumflex",   "@",            -- 141
+    ":",            "_",            "kanji",        "stop",         "ax",           -- 146
+    nil,            nil,            nil,            nil,            nil,            -- 151
+    "numPadEnter",  "rightCtrl",    nil,            nil,            nil,            -- 156
+    nil,            nil,            nil,            nil,            nil,            -- 161
+    nil,            nil,            nil,            nil,            nil,            -- 166
+    nil,            nil,            nil,            nil,            nil,            -- 171
+    nil,            nil,            nil,            "numPadComma",nil,              -- 176
+    "numPadDivide", nil,            nil,            "rightAlt",     nil,            -- 181
+    nil,            nil,            nil,            nil,            nil,            -- 186
+    nil,            nil,            nil,            nil,            nil,            -- 191
+    nil,            "pause",        nil,            "home",         "\27[A",        -- 196
+    "\27[5~",       nil,            "\27[D",        nil,            "\27[C",        -- 201
+    nil,            "end",          "\27[B",        "\27[6~",       "insert",       -- 206
+    "\127"                                                                        -- 211
+  }
+
+  local shifted = false
+  local ls, rs = false
+  kernel.log("vt100: WARNING: 'shift' key support is shaky")
+  local shift = {
+    leftShift = function(p) shifted = rs or p; ls = p end,
+    rightShift = function(p) shifted = ls or p; rs = p end,
+    ['.'] = ">",
+    [','] = "<",
+    ["'"] = '"',
+    ['1'] = "!",
+    ['2'] = "@",
+    ['3'] = "#",
+    ['4'] = "$",
+    ['5'] = "%",
+    ['6'] = "^",
+    ['7'] = "&",
+    ['8'] = "*",
+    ['9'] = "(",
+    ['0'] = ")",
+    ['-'] = "_",
+    ['='] = "+",
+    ['['] = "{",
+    [']'] = "}",
+    ['\\']= "|",
+    ['`'] = "~"
+  }
+  setmetatable(shift, {__index = function(t,k)
+                                     if #k == 1 then
+                                       return k:upper()
+                                     else
+                                       return ""
+                                     end
+                                   end})
 
   function kernel.vtemu(obj)
     expect(1, obj, "table")
@@ -101,6 +231,7 @@ do
     local nb = ""
     local mode = 0
     local ec = true
+    local lm = true
     local fg, bg = colors[8], colors[1]
     local p = {}
     local min, max = math.min, math.max
@@ -259,69 +390,84 @@ do
       end
     end
 
-    return write
+    local function read(n)
+      expect(1, n, "number", "nil")
+      if n and not lm then
+        if n == math.huge then
+          local t = rb
+          rb = ""
+          return t
+        end
+        while #rb < N do
+          coroutine.yield()
+        end
+      else
+        local N = n or 0
+        while #rb < N or not rb:find("\n") do
+          coroutine.yield()
+        end
+      end
+      n = n or rb:find("\n")
+      local ret = rb:sub(1, n)
+      rb = rb:sub(n + 1)
+      return ret
+    end
+    
+    local function key(_, code)
+      local c = keys[code]
+      if shifted and c:sub(1,1) ~= "\27" then c = shift[c] end
+      if #c > 1 and c:sub(1,1) ~= "\27" then
+        if type(c) == "function" then
+          c()
+          c = ""
+        end
+        c = ""
+      end
+      rb = rb .. c
+    end
+
+    local function key_up(_, code)
+      local c = keys[code]
+      c = shift[c]
+      if type(c) == "function" then c() end
+    end
+
+    kernel.event.register("key", key)
+    kernel.event.register("key_up", key_up)
+
+    return write, read
   end
 end
 
 do
   kernel.log("logger: creating VT100 term stream")
-  local vtw = kernel.vtemu(term)
+  local vtw, vtr = kernel.vtemu(term)
   kernel.log("logger: switching to VT100")
-  vtw("\27[5H")
-  kernel.vtwrite = vtw
+  vtw("\27["..(kernel.logY+1).."H")
+  kernel.logY = nil
+  kernel.console = {write = vtw, read = vtr}
   function kernel.log(msg)
+    msg = tostring(msg)
     for ln in msg:gmatch("[^\n]+") do
       vtw(string.format("[%4.4f] %s\n", (os.epoch("utc") - start) / 1000, ln))
     end
   end
   kernel.log("logger: using VT100")
-end
-
-kernel.log("kevent: initialize")
-do
-  local acts = {}
-  local event = {}
-  function event.register(evt, handler)
-    expect(1, evt, "string")
-    expect(2, handler, "function")
-    table.insert(acts, {call = handler, sig = evt})
-    return true
-  end
-
-  function event.pull(timeout)
-    expect(1, timeout, "number", "nil")
-    local timerId = timeout and  os.startTimer(timeout) or -1
-    local evt = table.pack(coroutine.yield())
-    if evt[1] == "timer" and evt[2] == timerId then
-      return
-    end
-    for k, act in pairs(acts) do
-      if act.sig == evt[1] then
-        local ok, err = pcall(act.call, table.unpack(evt))
-        if not ok and err then
-          kernel.log("kevent: listener error: " .. err)
-          acts[k] = nil
-        end
-      end
-    end
-    return table.unpack(evt)
-  end
-
-  os.pullEvent = event.pull
-  event.push = os.pushEvent
-  
-  kernel.event = event
+  kernel.log("\27[31mt\27[32mh\27[33mi\27[34ms \27[35ms\27[36mt\27[91mr\27[92mi\27[93mn\27[94mg \27[95mi\27[96ms\27[31m r\27[32ma\27[33mi\27[34mn\27[35mb\27[36mo\27[91mw\27[92m, \27[93mr\27[94mi\27[95mg\27[96mh\27[31m\27[32mt\27[33m?\27[39;49m")
 end
 
 kernel.log("vfs: initialize")
 do
+  -- This gets around CC's crappy default scheme of mounting disks at /diskN.
+  -- TODO: rewrite to support mounting arbitrary filesystems, otherwise devfs
+  -- TODO: and tmpfs and whatnot will use real disk space and I/O
   local ofs = fs
   _G.fs = {}
   local basic = ""
-  local alias = {["/"] = "/"} -- etc, etc
+  local aliases = {["/"] = bootPath} -- {[vfsPath] = realPath}
   local function split(p)
     local segments = {}
-    for seg in p:gmatch("[^/]+") do
+    for seg in p:gmatch("[^\\/]+") do
       if seg == ".." then
         table.remove(segments, #segments)
       else
@@ -335,9 +481,133 @@ do
     local parts = split(path)
     table.insert(parts, 1, "/")
     for i=#parts, 1, -1 do
-      local check = ""
+      local check = table.concat(parts, "/", 1, i):gsub("[\\/]+", "/")
+      local ret = table.concat(parts, "/", i + 1):gsub("[\\/]+", "/")
+      if aliases[check] then
+        local ensure = fs.combine(aliases[check], ret)
+        if ofs.exists(ensure) then
+          return ensure
+        else
+          break
+        end
+      end
     end
+    return path
+  end
+
+  function fs.combine(...)
+    return "/" .. (table.concat(table.pack(...), "/"):gsub("[\\/]+", "/"))
+  end
+
+  local basic = {"makeDirectory", "delete", "copy", "getCapacity", "isDir", "getSize", "getFreeSpace", "isDriveRoot", "attributes", "isReadOnly", "exists", "move"}
+  for k, v in pairs(basic) do
+    fs[v] = function(...)
+      local args = table.pack(...)
+      for kk, vv in pairs(args) do
+        args[kk] = resolve(vv)
+      end
+      return ofs[v](table.unpack(args))
+    end
+  end
+  function fs.open(f,m)
+    return ofs.open(resolve(f), m or "r")
+  end
+  function fs.list(path)
+    expect(1, path, "string")
+    path = resolve(path)
+    local isRoot = path == bootPath
+    local files = ofs.list(path)
+    if isRoot then -- filter out disk* entries from the rootfs
+      local remove = {}
+      for i=1, #files, 1 do
+        for k,v in pairs(aliases) do
+          if v == files[i] then
+            remove[i] = true
+          end
+        end
+      end
+      for i in pairs(remove) do
+        table.remove(files, i)
+      end
+    end
+    return files
+  end
+
+  -- let's provide loadfile here too
+  function loadfile(file, mode, env)
+    expect(1, file, "string")
+    expect(2, mode, "string", "nil")
+    expect(3, env, "table", "nil")
+    local handle, err = fs.open(file)
+    if not handle then
+      return nil, err
+    end
+    local data = handle.readAll()
+    handle.close()
+    return load(data, "="..file, mode or "bt", env or kernel.usb or _G)
   end
 end
 
-while true do kernel.event.pull() end
+kernel.log("scheduler: initialize")
+do
+  -- TODO: flesh out the scheduler API
+  local threads = {}
+  local t = {}
+  local timeout = 0.05
+  local last = 0
+  local cur = 0
+
+  function t.spawn(f,n)
+    expect(1, f, "function")
+    expect(2, n, "string")
+    last = last + 1
+    local new = {
+      parent = last - 1,
+      pid = last,
+      name = n,
+      coro = coroutine.create(f),
+      env = {},
+      io = {i = kernel.vt, o = kernel.vt}
+    }
+    threads[last] = new
+    return last
+  end
+
+  function t.info()
+    local thd = threads[cur]
+    return {
+      name = thd.name,
+      env = thd.env,
+      io = thd.io
+    }
+  end
+
+  function t.loop()
+    t.loop = nil
+    while #threads > 0 do
+      local sig = table.pack(kernel.event.pull(timeout))
+      for pid, thd in pairs(threads) do
+        local ok, err = coroutine.resume(thd.coro, table.unpack(sig))
+        if not ok or coroutine.status(thd.coro) == "dead" then
+          if err then
+            kernel.log(string.format("thread %s (PID %d) died: %s", thd.name, pid, err))
+          else
+            kernel.log(string.format("thread %s (PID %d) exited", thd.name, pid))
+          end
+          threads[pid] = nil
+        end
+      end
+    end
+    kernel.panic("all threads died")
+  end
+  kernel.thread = t
+end
+
+kernel.log("loading init from /sbin/init.lua")
+local ok, err = loadfile("/sbin/init.lua", "bt", kernel.usb)
+if not ok then
+  kernel.panic(err)
+end
+kernel.thread.spawn(ok, "[init]")
+
+kernel.thread.loop()
