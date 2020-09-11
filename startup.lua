@@ -17,7 +17,7 @@ if not ok then
   error(err)
 end
 
-local s, r = xpcall(ok, debug.traceback())
+local s, r = xpcall(ok, debug.traceback)
 if not s and r then
   error(r)
 end
