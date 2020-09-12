@@ -50,7 +50,7 @@ function _G.require(mod)
   elseif not loading[mod] then
     local lib, status, step
     
-    step, lib, status = "not found", package.searchpath(lib, package.path, ".", "/")
+    step, lib, status = "not found", package.searchpath(mod, package.path, ".", "/")
 
     if lib then
       step, lib, status = "loadfile failed", loadfile(lib)

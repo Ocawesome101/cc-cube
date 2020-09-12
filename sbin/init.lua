@@ -55,4 +55,14 @@ do
   if fail then init.panic(fail) end
 end
 
-
+init.log("Loading RC configuration...")
+do
+  local config = require("config")
+  local rc = require("rc")
+  local cfg = config.load("/etc/rc.cfg")
+  done()
+  init.log("Starting services...\n")
+  for i=1, #cfg, 1 do
+    rc.start(cfg[i])
+  end
+end

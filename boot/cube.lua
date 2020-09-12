@@ -502,6 +502,7 @@ do
   for k, v in pairs(basic) do
     fs[v] = function(...)
       local args = table.pack(...)
+      args.n = nil
       for kk, vv in pairs(args) do
         args[kk] = resolve(vv)
       end
