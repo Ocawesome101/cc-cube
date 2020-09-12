@@ -58,7 +58,15 @@ function _G.require(mod)
 
     if lib then
       loading[mod] = true
-      step, lib, status = "load failed", pcall(lib, mod)
+      step = "load failed"
+      local ok, err = pcall(lib, mod)
+      if not ok then
+        lib = nil
+        status = err
+      else
+        lib = err
+        status = ""
+      end
       loading[mod] = false
     end
 
