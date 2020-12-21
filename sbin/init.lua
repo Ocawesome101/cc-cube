@@ -65,4 +65,16 @@ do
   for i=1, #cfg, 1 do
     rc.start(cfg[i])
   end
+  done()
 end
+
+init.log("Starting getty")
+do
+  local ok, err = loadfile("/sbin/getty.lua")
+  if not ok then
+    init.panic(err)
+  end
+  io.write("\n")
+  kernel.thread.spawn(ok, "[getty]")
+end
+done()

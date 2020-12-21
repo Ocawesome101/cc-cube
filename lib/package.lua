@@ -72,7 +72,7 @@ function _G.require(mod)
 
     assert(lib, string.format("module '%s' %s:\n%s", mod, step, status))
     loaded[mod] = status
-    return status
+    return lib
   else
     error(string.format("already loading: %s\n%s", mod, debug.traceback(), 2))
   end
